@@ -71,7 +71,8 @@ func (w *Worker) Run() {
 	for {
 		select {
 		case r := <-w.ResultChain:
-			log.Println(r)
+			stdout := "{Cms:%s Path:%s Option:%s Content:%s}"
+			log.Printf(stdout, r.Name, r.Path, r.Option, r.Content)
 			return
 		default:
 			if len(w.JobQueue) == 0 {

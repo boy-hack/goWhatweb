@@ -1,7 +1,15 @@
 # goWhatweb
-[go语言写的web指纹识别] Identify websites by go language
+go语言编写的指纹识别，指纹数据1800+，大量指纹跑完需要花费大量时间，用go的目的是尽可能的节省时间(单机上)和尽可能的发挥最大效率。
 ## Useage
-
+- `./goWhatweb https://x.hacking8.com`
+```bash
+2018/12/23 17:31:39 domain:https://x.hacking8.com
+2018/12/23 17:31:42 {Cms:emlog Path:/robots.txt Option:keyword Content:emlog}
+elapsed: 3.346160239s
+```
+- 目录下`goWhatweb`是在`MAC`下编译好的
+- 但是你可以编译成二进制运行到任何平台
+​     
 ## Feature&&Checklist
 1. [ ] 内存加载指纹,在内存中对每个指纹的命中率进行统计，优先使用命中率高的指纹。（就是对排序数组中的路径hash做一次位置替换）
 
