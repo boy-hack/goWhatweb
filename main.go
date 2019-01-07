@@ -23,9 +23,10 @@ func main() {
 
 	// 开始并发相关
 	t1 := time.Now()
-	//domain := "https://x.hacking8.com" // 域名
+	//domain := "https://www.hacking8.com" // 域名
 
 	newWorker := engine.NewWorker(10)
+	newWorker.Checkout(domain)
 	newWorker.Start()
 
 	for _, v := range sortPairs {

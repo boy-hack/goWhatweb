@@ -1,11 +1,15 @@
 package engine
 
 import (
+	"bufio"
 	"crypto/md5"
 	"fmt"
 	"goWhatweb/fetch"
 	"goWhatweb/until"
+	"io"
 	"log"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -53,6 +57,51 @@ func (w *Worker) Start() {
 	}
 }
 
+func (w *Worker) Checkout(domain string) {
+	bytes, headers, err := fetch.Get(domain)
+	if err != nil {
+		panic(err)
+	}
+	// waf识别
+	fi, err := os.Open("waf.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer fi.Close()
+	br := bufio.NewReader(fi)
+	wafname := ""
+	for {
+		s, _, c := br.ReadLine()
+		if c == io.EOF {
+			break
+		}
+		str := string(s)
+		strs := strings.Split(str, "|")
+		option := strs[1]
+		content := strs[3]
+		if option == "index" {
+			if strings.Contains(string(bytes), content) {
+				wafname = strs[0]
+				break
+			}
+		} else {
+			val, ok := headers[strs[2]]
+			if ok {
+				match, _ := regexp.MatchString(content, strings.Join(val, ""))
+				if match {
+					wafname = strs[0]
+					break
+				}
+			}
+		}
+	}
+	if wafname != "" {
+		fmt.Printf("domain:%s waf:%s", domain, wafname)
+		w.MaxPool = 5
+	}
+
+}
+
 func (w *Worker) Stop() {
 	for i := 0; i < w.MaxPool; i++ {
 		w.quit <- true
@@ -95,7 +144,7 @@ func Comsumer(job JobStruct, w *Worker) {
 	if resp.StatusCode != 200 {
 		return
 	}
-	content, _ := fetch.Get(url)
+	content, _, _ := fetch.Get(url)
 
 	cmsinfos := job.Cmsdata
 	for _, cmsinfo := range cmsinfos {
