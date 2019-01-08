@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,11 @@ type Worker struct {
 	JobQueue    chan JobStruct
 	quit        chan bool
 	ResultChain chan until.Singcms
+	domain      string // 域名
+	delay       int    // 访问的延时时间
+	wg          *sync.WaitGroup
+	finished    bool // 是否完成
+	mutex       sync.Mutex
 }
 
 type JobStruct struct {
@@ -28,12 +34,16 @@ type JobStruct struct {
 	Cmsdata []until.Singcms
 }
 
-func NewWorker(count int) Worker {
+func NewWorker(count int, domain string, wg *sync.WaitGroup) Worker {
 	return Worker{
 		MaxPool:     count,
 		quit:        make(chan bool, count),
 		JobQueue:    make(chan JobStruct, count),
 		ResultChain: make(chan until.Singcms),
+		domain:      domain,
+		delay:       0,
+		wg:          wg,
+		finished:    false,
 	}
 }
 
@@ -41,24 +51,19 @@ func (w *Worker) Start() {
 	// starting n number of workers
 	for i := 0; i < w.MaxPool; i++ {
 		go func(i int) {
-			//fmt.Println("w", i)
 			for {
 				select {
-				case <-w.quit:
-					//fmt.Printf("%d channel quit\n",i)
-					return
 				case j := <-w.JobQueue:
 					Comsumer(j, w)
-
 				}
-
 			}
 		}(i)
 	}
+	go w.Run()
 }
 
-func (w *Worker) Checkout(domain string) {
-	bytes, headers, err := fetch.Get(domain)
+func (w *Worker) Checkout() {
+	bytes, headers, err := fetch.Get(w.domain)
 	if err != nil {
 		panic(err)
 	}
@@ -96,52 +101,60 @@ func (w *Worker) Checkout(domain string) {
 		}
 	}
 	if wafname != "" {
-		fmt.Printf("domain:%s waf:%s", domain, wafname)
-		w.MaxPool = 5
+		log.Printf("domain:%s waf:%s", w.domain, wafname)
+		w.MaxPool = 1
+		w.delay = 200
 	}
 
 }
 
 func (w *Worker) Stop() {
-	for i := 0; i < w.MaxPool; i++ {
-		w.quit <- true
-	}
+	w.mutex.Lock()
+	w.finished = true
+	w.mutex.Unlock()
 }
 
 func (w *Worker) Add(i JobStruct) {
 	//fmt.Println(i)
-	go func() {
-		w.JobQueue <- i
-	}()
+	w.mutex.Lock()
+	status := w.finished
+	w.mutex.Unlock()
+	if status {
+		return
+	}
+	w.wg.Add(1)
+	w.JobQueue <- i
 }
 
 func (w *Worker) Run() {
 	time.Sleep(time.Second)
 	for {
-		select {
-		case r := <-w.ResultChain:
-			stdout := "{Cms:%s Path:%s Option:%s Content:%s}"
-			log.Printf(stdout, r.Name, r.Path, r.Option, r.Content)
-			return
-		default:
-			if len(w.JobQueue) == 0 {
-				return
-			}
-			time.Sleep(time.Millisecond * 20)
-		}
+		r := <-w.ResultChain
+		stdout := "{Domain:%s Cms:%s Path:%s Option:%s Content:%s}"
+		log.Printf(stdout, w.domain, r.Name, r.Path, r.Option, r.Content)
+		break
 
+		//select {
+		//case r := <-w.ResultChain:
+		//default:
+		//	if len(w.JobQueue) == 0 {
+		//		return
+		//	}
+		//	time.Sleep(time.Millisecond * 20)
+		//}
 	}
 }
 
 func Comsumer(job JobStruct, w *Worker) {
 	url := job.Domain + job.Path
-	//fmt.Println(url)
 	resp, e := fetch.Head(url)
 	if e != nil {
 		log.Println(e)
+		defer w.wg.Done()
 		return
 	}
 	if resp.StatusCode != 200 {
+		defer w.wg.Done()
 		return
 	}
 	content, _, _ := fetch.Get(url)
@@ -154,7 +167,7 @@ func Comsumer(job JobStruct, w *Worker) {
 				//fmt.Println(cmsinfo)
 				w.ResultChain <- cmsinfo
 				w.Stop()
-				return
+				break
 			}
 		} else if option == "md5" {
 			md5str := fmt.Sprintf("%x", md5.Sum(content))
@@ -162,9 +175,10 @@ func Comsumer(job JobStruct, w *Worker) {
 				//fmt.Println(cmsinfo)
 				w.ResultChain <- cmsinfo
 				w.Stop()
-				return
+				break
 			}
 
 		}
 	}
+	defer w.wg.Done()
 }
